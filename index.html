@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+	<title></title>
+	<meta name="generator" content="LibreOffice 7.4.7.2 (Linux)"/>
+	<meta name="created" content="00:00:00"/>
+	<meta name="changed" content="00:00:00"/>
+	<style type="text/css">
+		@page { size: 8.27in 11.69in; margin: 0.79in }
+		p { line-height: 115%; margin-bottom: 0.1in; background: transparent }
+		pre { background: transparent }
+		pre.western { font-family: "Liberation Mono", monospace; font-size: 10pt }
+		pre.cjk { font-family: "Noto Sans Mono CJK SC", monospace; font-size: 10pt }
+		pre.ctl { font-family: "Liberation Mono", monospace; font-size: 10pt }
+	</style>
+</head>
+<body lang="en-US" link="#000080" vlink="#800000" dir="ltr"><pre class="western">&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;ja&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;UTF-8&quot;&gt;
+&lt;title&gt;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">日本語 → シムネ語 翻訳機</span></font>&lt;/title&gt;
+
+&lt;style&gt;
+body {
+  background:#0f1115;
+  color:#eaeaea;
+  font-family: system-ui, sans-serif;
+  padding:20px;
+}
+h1 { font-size:22px; }
+textarea, input {
+  width:100%;
+  background:#1c1f26;
+  color:#fff;
+  border:1px solid #444;
+  padding:10px;
+  margin-bottom:10px;
+}
+button {
+  padding:10px 16px;
+  font-size:15px;
+  cursor:pointer;
+}
+#output span.unknown {
+  color:#ff6b6b;
+  text-decoration: underline;
+}
+#status {
+  font-size:13px;
+  opacity:0.8;
+  margin-bottom:10px;
+}
+#dictSearchResult {
+  background:#1c1f26;
+  padding:8px;
+  max-height:120px;
+  overflow:auto;
+  font-size:14px;
+}
+&lt;/style&gt;
+&lt;/head&gt;
+
+&lt;body&gt;
+
+&lt;h1&gt;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">日本語 → シムネ語 翻訳機</span></font>&lt;/h1&gt;
+
+&lt;div id=&quot;status&quot;&gt;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">辞書未ロード</span></font>&lt;/div&gt;
+
+&lt;input id=&quot;dictUrl&quot; value=&quot;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">シムネ語 詩日辞書</span></font>.json&quot;&gt;
+
+&lt;textarea id=&quot;input&quot; placeholder=&quot;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">例：私 は 世界 を 見る</span></font>&quot;&gt;&lt;/textarea&gt;
+
+&lt;button onclick=&quot;translate()&quot;&gt;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">翻訳</span></font>&lt;/button&gt;
+
+&lt;h3&gt;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">翻訳結果</span></font>&lt;/h3&gt;
+&lt;div id=&quot;output&quot;&gt;&lt;/div&gt;
+
+&lt;hr&gt;
+
+&lt;h3&gt;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">辞書検索（日本語）</span></font>&lt;/h3&gt;
+&lt;input id=&quot;dictSearch&quot; placeholder=&quot;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">例：私 </span></font>/ <font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">世界 </span></font>/ <font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">見る</span></font>&quot; oninput=&quot;searchDict()&quot;&gt;
+&lt;div id=&quot;dictSearchResult&quot;&gt;&lt;/div&gt;
+
+&lt;script&gt;
+let jaToSimne = {};
+let loaded = false;
+
+async function loadDictionary(url) {
+  if (loaded) return;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  for (const word of data.words) {
+    const simne = word.entry?.form;
+    if (!simne) continue;
+
+    for (const tr of word.translations ?? []) {
+      if (!tr.rawForms) continue;
+
+      const cleaned = tr.rawForms
+        .replace(/<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">（</span></font>.*?<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">）</span></font>|\(.*?\)/g, &quot;&quot;)
+        .split(/[<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">、</span></font>,]/);
+
+      for (const ja of cleaned) {
+        const key = ja.trim();
+        if (key) jaToSimne[key] = simne;
+      }
+    }
+  }
+
+  loaded = true;
+  document.getElementById(&quot;status&quot;).textContent =
+    `<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">辞書ロード完了：</span></font>${Object.keys(jaToSimne).length} <font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">語</span></font>`;
+}
+
+function t(word) {
+  return jaToSimne[word] ?? null;
+}
+
+async function translate() {
+  const url = document.getElementById(&quot;dictUrl&quot;).value;
+  await loadDictionary(url);
+
+  const words = document.getElementById(&quot;input&quot;).value.trim().split(/\s+/);
+
+  let S=[], O=[], V=[], mode=&quot;S&quot;;
+
+  for (const w of words) {
+    if ([&quot;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">は</span></font>&quot;,&quot;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">が</span></font>&quot;].includes(w)) { mode=&quot;O&quot;; continue; }
+    if (w===&quot;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">を</span></font>&quot;) { mode=&quot;V&quot;; continue; }
+
+    if (mode===&quot;S&quot;) S.push(w);
+    else if (mode===&quot;O&quot;) O.push(w);
+    else V.push(w);
+  }
+
+  const ordered = [...S, ...V, ...O];
+
+  const out = ordered.map(w=&gt;{
+    const r = t(w);
+    return r ? r : `&lt;span class=&quot;unknown&quot;&gt;${w}&lt;/span&gt;`;
+  }).join(&quot; &quot;);
+
+  document.getElementById(&quot;output&quot;).innerHTML = out;
+}
+
+function searchDict() {
+  const q = document.getElementById(&quot;dictSearch&quot;).value.trim();
+  if (!q) {
+    document.getElementById(&quot;dictSearchResult&quot;).textContent=&quot;&quot;;
+    return;
+  }
+  const r = jaToSimne[q];
+  document.getElementById(&quot;dictSearchResult&quot;).textContent =
+    r ? `${q} → ${r}` : &quot;<font face="Noto Sans Mono CJK SC, monospace"><span lang="zh-CN">未登録</span></font>&quot;;
+}
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+</body>
+</html>
