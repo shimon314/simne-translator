@@ -45,6 +45,14 @@ textarea{
   font-size:13px;
   color:#94a3b8;
 }
+.unknown{
+  color:#f87171; /* 赤っぽい */
+  font-weight:600;
+}
+.tag{
+  color:#60a5fa;
+  font-weight:600;
+}
 </style>
 </head>
 
@@ -58,7 +66,8 @@ textarea{
 <main>
 
 <div class="card">
-  <textarea id="inputText" placeholder="私は学生だ / 私は世界を見る"></textarea>
+  <textarea id="inputText" placeholder="私は学生だ / 私は世界を見る" autocomplete="off" autocapitalize="off"></textarea>
+  <div class="note">（入力中に即時翻訳されます。IME確定中は処理を待ちます）</div>
 </div>
 
 <div class="card">
@@ -83,40 +92,79 @@ const COPULA = { first:"seg", second:"sem", third:"set" };
 let dict = {};
 let ready = false;
 
+/* IME / デバウンス制御 */
+let composing = false;
+let debounceTimer = null;
+const DEBOUNCE_MS = 60;
+
 /* 初期化 */
 loadDict();
-inputEl.addEventListener("input", translate);
+inputEl.addEventListener("input", ()=>{ if(!composing) debounceTranslate(); });
+inputEl.addEventListener("compositionstart", ()=>{ composing = true; });
+inputEl.addEventListener("compositionend", ()=>{ composing = false; debounceTranslate(); });
 
-/* 辞書ロード */
+function debounceTranslate(){
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(translate, DEBOUNCE_MS);
+}
+
+/* エスケープ（安全に innerHTML にするため） */
+function escapeHTML(s){
+  return s.replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+}
+
+/* 辞書ロード（ローカルに失敗したら GitHub raw にフォールバック） */
 async function loadDict(){
+  const localPath = "シムネ語 詩日辞書.json";
+  const rawUrl = `https://raw.githubusercontent.com/shimon314/simne-translator/5b02bfd1bcedece39d4cabe55e88aedebca7eb96/${encodeURIComponent("シムネ語 詩日辞書.json")}`;
   try{
-    const res = await fetch("シムネ語 詩日辞書.json",{cache:"no-store"});
-    const json = await res.json();
-    json.words.forEach(w=>{
-      const sim = w.entry?.form;
-      if(!sim) return;
-      (w.translations||[]).forEach(t=>{
-        if(!t.rawForms) return;
-        t.rawForms.replace(/（.*?）|\(.*?\)/g,"")
-        .split(/[、,]/).forEach(j=>{
-          j=j.trim();
-          if(j) dict[j]=sim;
-        });
-      });
-    });
-    ready=true;
-    statusEl.textContent=`辞書ロード完了：${Object.keys(dict).length}語`;
-  }catch{
-    statusEl.textContent="辞書ロード失敗";
+    statusEl.textContent = "辞書ロード中… (ローカル)";
+    await fetchAndBuild(localPath);
+    ready = true;
+    statusEl.textContent = `辞書ロード完了：${Object.keys(dict).length}語`;
+  }catch(e1){
+    try{
+      statusEl.textContent = "ローカル辞書取得失敗、GitHub raw から取得中…";
+      await fetchAndBuild(rawUrl);
+      ready = true;
+      statusEl.textContent = `辞書ロード完了 (raw)：${Object.keys(dict).length}語`;
+    }catch(e2){
+      ready = false;
+      statusEl.textContent = "辞書ロード失敗";
+      console.error(e1, e2);
+    }
   }
 }
 
-/* 翻訳 */
+async function fetchAndBuild(url){
+  const res = await fetch(url, {cache:"no-store"});
+  if(!res.ok) throw new Error("fetch failed");
+  const json = await res.json();
+  json.words.forEach(w=>{
+    const sim = w.entry?.form;
+    if(!sim) return;
+    (w.translations||[]).forEach(t=>{
+      if(!t.rawForms) return;
+      t.rawForms.replace(/（.*?）|\(.*?\)/g,"")
+      .split(/[、,]/).forEach(j=>{
+        j=j.trim();
+        if(j) dict[j]=sim;
+      });
+    });
+  });
+}
+
+/* 翻訳本体 */
 function translate(){
   if(!ready) return;
-  const text = inputEl.value.trim();
-  outputEl.textContent="";
-  if(!text) return;
+  const raw = inputEl.value;
+  if(!raw || raw.trim()===""){
+    outputEl.textContent = "";
+    return;
+  }
+  const text = raw.trim();
 
   // コピュラ文 (例: 私は学生だ)
   let m = text.match(/^(.+?)は(.+?)(だ|です|である)$/);
@@ -126,7 +174,7 @@ function translate(){
     const person = PRONOUN_PERSON[subjJa] || "third";
     const subj = dict[subjJa] || subjJa;
     const pred = dict[predJa] || predJa;
-    outputEl.textContent = `${subj} ${COPULA[person]} ${pred}`;
+    outputEl.innerHTML = `${escapeHTML(subj)} <span class="tag">${escapeHTML(COPULA[person])}</span> ${escapeHTML(pred)}`;
     return;
   }
 
@@ -139,14 +187,26 @@ function translate(){
     const subj = dict[subjJa] || subjJa;
     const obj  = dict[objJa]  || objJa;
     const verb = dict[verbJa] || verbJa;
-    outputEl.textContent = `${subj} ${verb} ${obj}`;
+    outputEl.innerHTML = `${escapeHTML(subj)} ${escapeHTML(verb)} ${escapeHTML(obj)}`;
     return;
   }
 
-  // 単語単位で辞書変換
+  // 部分・単語単位で辞書変換（未登録語はハイライト）
   const words = text.split(/\s+/);
-  const out = words.map(w=>dict[w]||w);
-  outputEl.textContent = out.join(" ");
+  const out = words.map(w=>{
+    // 句読点を保持
+    const m = w.match(/^(.+?)([、,。\.！!？?]*)$/);
+    const core = m ? m[1] : w;
+    const tail = m ? m[2] : "";
+    const sim = dict[core];
+    if(sim){
+      return `<span>${escapeHTML(sim)}</span>${escapeHTML(tail)}`;
+    }else{
+      // 未登録語はハイライトして元の日本語を表示
+      return `<span class="unknown">${escapeHTML(core)}</span>${escapeHTML(tail)}`;
+    }
+  });
+  outputEl.innerHTML = out.join(" ");
 }
 </script>
 
