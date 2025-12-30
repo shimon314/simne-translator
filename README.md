@@ -3,228 +3,261 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>シムネ語 翻訳エンジン</title>
+<title>Simne Translator</title>
 
 <style>
-:root {
-  --bg:#0e1117;
-  --panel:#161b22;
-  --border:#30363d;
-  --text:#e6edf3;
-  --ok:#3fb950;
-  --err:#f85149;
-  --accent:#238636;
+:root{
+  --bg:#0f172a;
+  --panel:#020617;
+  --card:#020617;
+  --border:#1e293b;
+  --text:#e5e7eb;
+  --sub:#94a3b8;
+  --accent:#2563eb;
+  --err:#ef4444;
 }
-body {
+*{box-sizing:border-box}
+body{
+  margin:0;
   background:var(--bg);
   color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,sans-serif;
-  padding:14px;
 }
-h1 {
-  font-size:22px;
+header{
+  padding:12px 16px;
+  border-bottom:1px solid var(--border);
+  font-weight:600;
+}
+#status{
+  font-size:12px;
+  color:var(--sub);
+}
+main{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  padding:12px;
+}
+.translator{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+}
+.label{
+  font-size:12px;
+  color:var(--sub);
   margin-bottom:6px;
 }
-#status {
-  font-size:13px;
-  margin-bottom:10px;
-}
-.ok { color:var(--ok); }
-.err { color:var(--err); }
-
-.panel {
-  background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:8px;
-  padding:12px;
-  margin-bottom:12px;
-}
-
-textarea {
-  width:100%;
+textarea{
+  flex:1;
   background:transparent;
-  color:var(--text);
   border:none;
-  resize:none;
+  color:var(--text);
   font-size:16px;
-  min-height:72px;
+  resize:none;
   outline:none;
 }
-
-.toggle {
-  display:flex;
-  gap:6px;
-  margin-top:10px;
+.output{
+  font-size:16px;
+  white-space:pre-wrap;
 }
-.toggle button {
-  flex:1;
-  padding:8px;
-  border-radius:6px;
-  border:1px solid var(--border);
-  background:#0d1117;
-  color:var(--text);
-}
-.toggle button.active {
-  background:var(--accent);
-}
-
-#output span.unknown {
+.unknown{
   color:var(--err);
   text-decoration:underline;
+}
+.controls{
+  display:flex;
+  gap:6px;
+  margin-top:8px;
+}
+.controls button{
+  flex:1;
+  background:#020617;
+  border:1px solid var(--border);
+  color:var(--text);
+  padding:6px;
+  border-radius:8px;
+}
+.controls button.active{
+  background:var(--accent);
+}
+@media(max-width:700px){
+  .translator{grid-template-columns:1fr}
 }
 </style>
 </head>
 
 <body>
 
-<h1>シムネ語 翻訳エンジン</h1>
-<div id="status">辞書ロード中…</div>
+<header>
+  Simne Translator
+  <div id="status">Loading dictionary…</div>
+</header>
 
-<div class="panel">
-<textarea id="input" placeholder="私は学生だ / 私は世界を見る"></textarea>
+<main>
+  <div class="translator">
 
-<div class="toggle">
-  <button data-tense="present" class="active">現在</button>
-  <button data-tense="past">過去</button>
-  <button data-tense="future">未来</button>
-</div>
-</div>
+    <div class="card">
+      <div class="label">日本語</div>
+      <textarea id="input" placeholder="私はあなたの世界を見る"></textarea>
+      <div class="controls">
+        <button data-tense="present" class="active">現在</button>
+        <button data-tense="past">過去</button>
+        <button data-tense="future">未来</button>
+      </div>
+    </div>
 
-<div class="panel">
-<b>翻訳結果</b>
-<div id="output"></div>
-</div>
+    <div class="card">
+      <div class="label">シムネ語</div>
+      <div id="output" class="output"></div>
+    </div>
+
+  </div>
+</main>
 
 <script>
-/* ===== 設定 ===== */
-const DICT_FILE = "シムネ語 詩日辞書.json";
-const COPULA = { first:"seg", second:"sem", third:"set" };
-const COPULA_TRIGGERS = ["だ","です","である"];
-const FIRST = ["私","僕","俺"];
-const SECOND = ["あなた","君"];
+/* ========= 設定 ========= */
+const DICT_FILE="シムネ語 詩日辞書.json";
+const COPULA={first:"seg",second:"sem",third:"set"};
+const COPULA_TRIG=["だ","です","である"];
+const FIRST=["私","僕","俺"];
+const SECOND=["あなた","君"];
 
-/* ===== 状態 ===== */
-let jaToSimne = {};
-let dictReady = false;
-let currentTense = "present";
+/* ========= 格変化 ========= */
+const CASE_TABLE={
+  ce:{nom:"ce",gen:"ces",acc:"cem",poss:"cest"},
+  di:{nom:"di",gen:"dit",acc:"dim",poss:"din"},
+  ra:{nom:"ra",gen:"rai",acc:"rat",poss:"raks"},
+  da:{nom:"da",gen:"dai",acc:"dat",poss:"daks"},
+  ya:{nom:"ya",gen:"yai",acc:"yat",poss:"yake"},
+  o:{nom:"o",gen:"ok",acc:"e",poss:"om"},
+  ci:{nom:"ci",gen:"cis",acc:"cim",poss:"cit"},
+  dis:{nom:"dis",gen:"dik",acc:"did",poss:"dip"},
+  ro:{nom:"ro",gen:"re",acc:"ri",poss:"rori"},
+  das:{nom:"das",gen:"do",acc:"dez",poss:"dao"},
+  yo:{nom:"yo",gen:"yon",acc:"yom",poss:"yog"},
+  oz:{nom:"oz",gen:"og",acc:"be",poss:"oks"}
+};
 
-/* ===== 初期化 ===== */
-loadDictionary();
+/* ========= 状態 ========= */
+let dict={},ready=false,tense="present";
+
+/* ========= 初期化 ========= */
+loadDict();
 bindUI();
 
-/* ===== 辞書ロード ===== */
-async function loadDictionary() {
-  try {
-    const res = await fetch(DICT_FILE,{cache:"no-store"});
-    const data = await res.json();
-
-    data.words.forEach(w=>{
-      const sim = w.entry?.form;
-      if (!sim) return;
-      (w.translations||[]).forEach(tr=>{
-        if (!tr.rawForms) return;
-        tr.rawForms
-          .replace(/（.*?）|\(.*?\)/g,"")
-          .split(/[、,]/)
-          .forEach(j=>{
-            const k=j.trim();
-            if(k) jaToSimne[k]=sim;
-          });
+/* ========= 辞書 ========= */
+async function loadDict(){
+  try{
+    const r=await fetch(DICT_FILE,{cache:"no-store"});
+    const j=await r.json();
+    j.words.forEach(w=>{
+      const sim=w.entry?.form;
+      if(!sim)return;
+      (w.translations||[]).forEach(t=>{
+        if(!t.rawForms)return;
+        t.rawForms.replace(/（.*?）|\(.*?\)/g,"")
+        .split(/[、,]/)
+        .forEach(x=>{
+          x=x.trim();
+          if(x)dict[x]=sim;
+        });
       });
     });
-
-    dictReady = true;
-    setStatus(`辞書ロード完了：${Object.keys(jaToSimne).length}語`,true);
-  } catch {
-    setStatus("辞書ロード失敗",false);
+    ready=true;
+    status(`辞書ロード完了：${Object.keys(dict).length}語`);
+  }catch{
+    status("辞書ロード失敗");
   }
 }
+function status(t){
+  document.getElementById("status").textContent=t;
+}
 
-/* ===== UI ===== */
-function bindUI() {
-  document.getElementById("input")
-    .addEventListener("input",translate);
-
-  document.querySelectorAll(".toggle button").forEach(b=>{
+/* ========= UI ========= */
+function bindUI(){
+  input.oninput=translate;
+  document.querySelectorAll(".controls button").forEach(b=>{
     b.onclick=()=>{
-      document.querySelectorAll(".toggle button")
+      document.querySelectorAll(".controls button")
         .forEach(x=>x.classList.remove("active"));
       b.classList.add("active");
-      currentTense=b.dataset.tense;
+      tense=b.dataset.tense;
       translate();
     };
   });
 }
 
-function setStatus(text,ok){
-  document.getElementById("status").innerHTML =
-    `<span class="${ok?"ok":"err"}">${text}</span>`;
-}
-
-/* ===== 日本語分割 ===== */
-function tokenize(text){
-  const keys=Object.keys(jaToSimne).sort((a,b)=>b.length-a.length);
-  const out=[];
-  let i=0;
-  while(i<text.length){
+/* ========= 分割 ========= */
+function tokenize(t){
+  const keys=Object.keys(dict).sort((a,b)=>b.length-a.length);
+  const out=[]; let i=0;
+  while(i<t.length){
     let hit=false;
     for(const k of keys){
-      if(text.startsWith(k,i)){
+      if(t.startsWith(k,i)){
         out.push(k); i+=k.length; hit=true; break;
       }
     }
-    if(!hit){ out.push(text[i]); i++; }
+    if(!hit){ out.push(t[i]); i++; }
   }
   return out;
 }
 
-/* ===== 翻訳 ===== */
+/* ========= 格 ========= */
+function applyCase(w,k){
+  if(CASE_TABLE[w]) return CASE_TABLE[w][k];
+  if(k==="gen") return w+"d";
+  if(k==="poss") return w+"s";
+  return w;
+}
+
+/* ========= 翻訳 ========= */
 function translate(){
-  if(!dictReady) return;
+  if(!ready){output.textContent="";return;}
+  const t=input.value.trim();
+  if(!t){output.textContent="";return;}
 
-  const text=document.getElementById("input").value.trim();
-  if(!text){
-    document.getElementById("output").innerHTML="";
-    return;
-  }
+  const ws=t.includes(" ")?t.split(/\s+/):tokenize(t);
+  let S=null,O=[],cop=false;
 
-  const words=text.includes(" ")
-    ? text.split(/\s+/)
-    : tokenize(text);
-
-  let subject=null, comps=[], cop=false;
-
-  words.forEach(w=>{
-    if(["は","が"].includes(w)) return;
-    if(COPULA_TRIGGERS.includes(w)){ cop=true; return; }
-    if(!subject) subject=w;
-    else comps.push(w);
+  ws.forEach(w=>{
+    if(["は","が"].includes(w))return;
+    if(w==="を"){return;}
+    if(w==="の"){O.case="gen";return;}
+    if(COPULA_TRIG.includes(w)){cop=true;return;}
+    if(!S)S=w; else O.push(w);
   });
 
-  const person = FIRST.includes(subject)
-    ? "first"
-    : SECOND.includes(subject)
-      ? "second"
-      : "third";
+  const person=FIRST.includes(S)?"first":SECOND.includes(S)?"second":"third";
+  let out=[];
 
-  const out=[];
-  out.push(jaToSimne[subject]||u(subject));
+  let s=dict[S]||u(S);
+  out.push(applyCase(s,"nom"));
 
   if(cop){
     let c=COPULA[person];
-    if(currentTense==="past") c+="s";
-    if(currentTense==="future") c+="it";
+    if(tense==="past")c+="s";
+    if(tense==="future")c+="it";
     out.push(c);
   }
 
-  comps.forEach(w=>{
-    out.push(jaToSimne[w]||u(w));
+  O.forEach(w=>{
+    let x=dict[w]||u(w);
+    out.push(applyCase(x,"acc"));
   });
 
-  document.getElementById("output").innerHTML=out.join(" ");
+  output.innerHTML=out.join(" ");
 }
-
-function u(w){ return `<span class="unknown">${w}</span>`; }
+function u(w){return `<span class="unknown">${w}</span>`;}
 </script>
 
 </body>
