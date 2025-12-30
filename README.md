@@ -2,42 +2,52 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>日本語 → シムネ語 翻訳機</title>
 
 <style>
 body {
-  background:#0f1115;
-  color:#eaeaea;
-  font-family: system-ui, sans-serif;
-  padding:20px;
+  background:#0e1117;
+  color:#e6edf3;
+  font-family:-apple-system, BlinkMacSystemFont, sans-serif;
+  padding:16px;
 }
-h1 { font-size:22px; }
+h1 { font-size:22px; margin-bottom:8px; }
 textarea, input {
   width:100%;
-  background:#1c1f26;
-  color:#fff;
-  border:1px solid #444;
+  background:#161b22;
+  color:#e6edf3;
+  border:1px solid #30363d;
+  border-radius:6px;
   padding:10px;
   margin-bottom:10px;
 }
 button {
-  padding:10px 16px;
-  font-size:15px;
+  width:100%;
+  padding:12px;
+  font-size:16px;
+  background:#238636;
+  color:white;
+  border:none;
+  border-radius:6px;
 }
-#output span.unknown {
-  color:#ff6b6b;
-  text-decoration: underline;
-}
+button:active { opacity:0.8; }
 #status {
   font-size:13px;
-  opacity:0.8;
   margin-bottom:10px;
 }
-#dictSearchResult {
-  background:#1c1f26;
-  padding:8px;
-  max-height:120px;
-  overflow:auto;
+.ok { color:#3fb950; }
+.err { color:#f85149; }
+#output span.unknown {
+  color:#f85149;
+  text-decoration:underline;
+}
+.card {
+  background:#161b22;
+  border:1px solid #30363d;
+  border-radius:6px;
+  padding:10px;
+  margin-bottom:12px;
 }
 </style>
 </head>
@@ -45,76 +55,83 @@ button {
 <body>
 
 <h1>日本語 → シムネ語 翻訳機</h1>
+<div id="status">辞書ロード中…</div>
 
-<div id="status">辞書未ロード</div>
-
+<div class="card">
 <textarea id="input" placeholder="例：私は世界を見る"></textarea>
-<button onclick="translate()">翻訳</button>
+<button id="translateBtn">翻訳</button>
+</div>
 
+<div class="card">
 <h3>翻訳結果</h3>
 <div id="output"></div>
+</div>
 
-<hr>
-
+<div class="card">
 <h3>辞書検索（日本語）</h3>
 <input id="dictSearch" placeholder="例：私 / 世界 / 見る">
-<div id="dictSearchResult"></div>
+<div id="dictResult"></div>
+</div>
 
 <script>
+const DICT_FILE = "シムネ語 詩日辞書.json";
+
 let jaToSimne = {};
-let dictLoaded = false;
+let dictReady = false;
 
-/* 辞書ロード */
+/* ========= 辞書ロード ========= */
 async function loadDictionary() {
-  if (dictLoaded) return;
+  try {
+    const res = await fetch(DICT_FILE, { cache: "no-store" });
+    if (!res.ok) throw new Error("fetch失敗");
 
-  const res = await fetch("シムネ語 詩日辞書.json");
-  const data = await res.json();
+    const data = await res.json();
+    if (!data.words) throw new Error("JSON構造不正");
 
-  for (const word of data.words) {
-    const simne = word.entry?.form;
-    if (!simne) continue;
+    for (const w of data.words) {
+      const simne = w.entry?.form;
+      if (!simne) continue;
 
-    for (const tr of word.translations ?? []) {
-      if (!tr.rawForms) continue;
+      for (const tr of w.translations ?? []) {
+        if (!tr.rawForms) continue;
 
-      const list = tr.rawForms
-        .replace(/（.*?）|\(.*?\)/g, "")
-        .split(/[、,]/);
+        const list = tr.rawForms
+          .replace(/（.*?）|\(.*?\)/g, "")
+          .split(/[、,]/);
 
-      for (const ja of list) {
-        const key = ja.trim();
-        if (key) jaToSimne[key] = simne;
+        for (const ja of list) {
+          const key = ja.trim();
+          if (key) jaToSimne[key] = simne;
+        }
       }
     }
-  }
 
-  dictLoaded = true;
-  document.getElementById("status").textContent =
-    `辞書ロード完了：${Object.keys(jaToSimne).length}語`;
+    dictReady = true;
+    document.getElementById("status").innerHTML =
+      `<span class="ok">辞書ロード完了：${Object.keys(jaToSimne).length}語</span>`;
+  } catch (e) {
+    document.getElementById("status").innerHTML =
+      `<span class="err">辞書ロード失敗：${e.message}</span>`;
+  }
 }
 
-/* スペースなし日本語を分割 */
-function tokenizeJapanese(text) {
+/* ========= 日本語分割（スペースなし対応） ========= */
+function tokenize(text) {
   const tokens = [];
   let i = 0;
-
-  const dictWords = Object.keys(jaToSimne)
-    .sort((a, b) => b.length - a.length);
+  const dictWords = Object.keys(jaToSimne).sort((a,b)=>b.length-a.length);
 
   while (i < text.length) {
-    let matched = false;
-
+    let hit = false;
     for (const w of dictWords) {
       if (text.startsWith(w, i)) {
         tokens.push(w);
         i += w.length;
-        matched = true;
+        hit = true;
         break;
       }
     }
-
-    if (!matched) {
+    if (!hit) {
       tokens.push(text[i]);
       i++;
     }
@@ -122,22 +139,22 @@ function tokenizeJapanese(text) {
   return tokens;
 }
 
-/* 翻訳 */
-async function translate() {
-  await loadDictionary();
+/* ========= 翻訳 ========= */
+function translateText() {
+  if (!dictReady) return;
 
   const input = document.getElementById("input").value.trim();
   if (!input) return;
 
   const words = input.includes(" ")
     ? input.split(/\s+/)
-    : tokenizeJapanese(input);
+    : tokenize(input);
 
   let S=[], O=[], V=[], mode="S";
 
   for (const w of words) {
     if (["は","が"].includes(w)) { mode="O"; continue; }
-    if (w === "を") { mode="V"; continue; }
+    if (w==="を") { mode="V"; continue; }
 
     if (mode==="S") S.push(w);
     else if (mode==="O") O.push(w);
@@ -146,32 +163,31 @@ async function translate() {
 
   const ordered = [...S, ...V, ...O];
 
-  const result = ordered.map(w => {
-    return jaToSimne[w]
-      ? jaToSimne[w]
-      : `<span class="unknown">${w}</span>`;
-  }).join(" ");
-
-  document.getElementById("output").innerHTML = result;
+  document.getElementById("output").innerHTML =
+    ordered.map(w =>
+      jaToSimne[w]
+        ? jaToSimne[w]
+        : `<span class="unknown">${w}</span>`
+    ).join(" ");
 }
 
-/* 辞書検索 */
-document.getElementById("dictSearch").addEventListener("input", async e => {
-  await loadDictionary();
-  const q = e.target.value.trim();
-  const out = document.getElementById("dictSearchResult");
+/* ========= 辞書検索 ========= */
+function searchDict(q) {
+  if (!dictReady) return "";
+  return jaToSimne[q] ?? "未登録";
+}
 
-  if (!q) {
-    out.textContent = "";
-    return;
-  }
+/* ========= イベント ========= */
+document.getElementById("translateBtn").onclick = translateText;
 
-  out.textContent = jaToSimne[q]
-    ? `${q} → ${jaToSimne[q]}`
-    : "未登録";
+document.getElementById("dictSearch").addEventListener("input", e => {
+  document.getElementById("dictResult").textContent =
+    searchDict(e.target.value.trim());
 });
+
+/* ========= 初期化 ========= */
+loadDictionary();
 </script>
 
 </body>
 </html>
-
