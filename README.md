@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Simne Translator (Stable Full) — Editable Dictionary</title>
+<title>Simne Translator (Stable Full) — Editable Dictionary (Persistent)</title>
 
 <style>
 body{
@@ -142,7 +142,7 @@ button.secondary{
 
 <header>
   <div class="header-left">
-    <b>Simne Translator — 編集対応版</b>
+    <b>Simne Translator — 編集対応版（永続化）</b>
     <div class="note" id="status">辞書ロード中…</div>
   </div>
   <div class="controls">
@@ -153,13 +153,14 @@ button.secondary{
     <button id="btnDownload">JSONダウンロード</button>
     <button id="btnEditJson" class="secondary">JSON編集</button>
     <button id="btnReset" class="secondary">辞書リロード</button>
+    <button id="btnClearLocal" class="secondary" title="ローカル保存を消してリモートから再取得">ローカル保存をクリア</button>
   </div>
 </header>
 
 <main>
 
 <div class="card">
-  <textarea id="inputText" placeholder="私は学生だ / 私は世界を見る / 私は話す" autocomplete="off" autocapitalize="off"></textarea>
+  <textarea id="inputText" placeholder="私は学生だ / 私は世界を見る / 私は話す / 私は大きい" autocomplete="off" autocapitalize="off"></textarea>
   <div class="note">（入力中に即時翻訳、IME確定は待ちます。未登録語はクリックで追加できます）</div>
 </div>
 
@@ -169,7 +170,7 @@ button.secondary{
 
 <div class="card">
   <div class="small-muted">辞書サイズ: <span id="dictSize">0</span> 語</div>
-  <div class="small-muted" style="margin-top:8px">操作: 未登録語をクリック → 品詞（日本語表記） / シムネ語形 / 表示日本語 / 訳 を入力して追加できます。JSON編集で直接編集後「適用」で読み込みます。</div>
+  <div class="small-muted" style="margin-top:8px">操作: 未登録語をクリック → 品詞（日本語表記） / シムネ語形 / 表示日本語 / 訳 を入力して追加できます。JSON編集で直接編集後「適用」で読み込みます。追加はブラウザに保存され、再読み込みしても消えません。</div>
 </div>
 
 </main>
@@ -221,12 +222,14 @@ button.secondary{
     <textarea id="jsonEditor" style="min-height:240px;font-family:monospace"></textarea>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
       <button id="jsonCancel" class="secondary">閉じる</button>
-      <button id="jsonApply">適用して読み込み</button>
+      <button id="jsonApply">適用して読み込み（かつ保存）</button>
     </div>
   </div>
 </div>
 
 <script>
+const STORAGE_KEY = 'simne_dict_json';
+
 const inputEl  = document.getElementById("inputText");
 const outputEl = document.getElementById("outputText");
 const statusEl = document.getElementById("status");
@@ -236,6 +239,7 @@ const btnUpload = document.getElementById("btnUpload");
 const btnDownload = document.getElementById("btnDownload");
 const btnEditJson = document.getElementById("btnEditJson");
 const btnReset = document.getElementById("btnReset");
+const btnClearLocal = document.getElementById("btnClearLocal");
 
 const modalBackdrop = document.getElementById("modalBackdrop");
 const modalCore = document.getElementById("modalCore");
@@ -260,6 +264,7 @@ const COPULA = { first:"seg", second:"sem", third:"set" };
 
 /* 辞書データ構造 */
 let dict = {};          // 日本語表記 -> sim form
+let posMap = {};        // 日本語表記 -> pos (日本語表記)
 let jsonData = { words: [] }; // 元の JSON 全体を保持
 let ready = false;
 
@@ -291,7 +296,9 @@ uploadEl.addEventListener("change", async (e)=>{
     const parsed = JSON.parse(txt);
     jsonData = parsed;
     buildDictFromJson();
-    statusEl.textContent = `アップロード辞書読み込み完了：${Object.keys(dict).length}語`;
+    // 保存して永続化（ユーザーがアップロードした辞書を現在の辞書として保存）
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(jsonData));
+    statusEl.textContent = `アップロード辞書読み込み完了：${Object.keys(dict).length}語（保存済み）`;
     debounceTranslate();
   }catch(err){
     alert("JSONの読み込みに失敗しました: " + err.message);
@@ -320,8 +327,10 @@ jsonApply.addEventListener("click", ()=>{
     const parsed = JSON.parse(jsonEditor.value);
     jsonData = parsed;
     buildDictFromJson();
+    // 保存して永続化（手動編集を明示的に適用すると保存される）
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(jsonData));
     jsonBackdrop.style.display = "none";
-    statusEl.textContent = `手動編集を適用：${Object.keys(dict).length}語`;
+    statusEl.textContent = `手動編集を適用（保存）：${Object.keys(dict).length}語`;
     debounceTranslate();
   }catch(err){
     alert("JSON のパースに失敗しました: " + err.message);
@@ -329,11 +338,22 @@ jsonApply.addEventListener("click", ()=>{
 });
 
 btnReset.addEventListener("click", ()=>{
-  // リロードして初期辞書を再取得
+  // リロードして初期辞書を再取得（ただし localStorage がある場合は優先される）
   dict = {};
   ready = false;
   statusEl.textContent = "辞書をリロードしています…";
   loadDict(true);
+});
+
+btnClearLocal.addEventListener("click", ()=>{
+  if(confirm("ローカル保存された辞書を消去してリモートの辞書に戻しますか？（元に戻せません）")){
+    localStorage.removeItem(STORAGE_KEY);
+    dict = {};
+    posMap = {};
+    ready = false;
+    statusEl.textContent = "ローカル保存を消去しました。リモートから再取得します…";
+    loadDict(true);
+  }
 });
 
 /* モーダル操作 */
@@ -365,6 +385,8 @@ modalAdd.addEventListener("click", ()=>{
     translations: [{ pos: pos || undefined, rawForms: rawForms }]
   };
   addEntryToJson(item);
+  // 永続化
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(jsonData));
   modalBackdrop.style.display = "none";
   debounceTranslate();
 });
@@ -376,8 +398,24 @@ function escapeHTML(s){
   })[c]);
 }
 
-/* 辞書ロード（ローカルに失敗したら GitHub raw にフォールバック） */
+/* 辞書ロード（localStorage があればそれを優先し、無ければローカル→GitHub raw にフォールバック） */
 async function loadDict(forceRaw=false){
+  // 1) localStorage 優先
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if(saved && !forceRaw){
+    try{
+      jsonData = JSON.parse(saved);
+      buildDictFromJson();
+      ready = true;
+      statusEl.textContent = `辞書ロード完了（保存済み）：${Object.keys(dict).length}語`;
+      debounceTranslate();
+      return;
+    }catch(e){
+      console.warn("localStorage parse error, will fallback to fetch:", e);
+      // fall through to fetching
+    }
+  }
+
   const localPath = "シムネ語 詩日辞書.json";
   const rawUrl = `https://raw.githubusercontent.com/shimon314/simne-translator/5b02bfd1bcedece39d4cabe55e88aedebca7eb96/${encodeURIComponent("シムネ語 詩日辞書.json")}`;
   try{
@@ -388,12 +426,14 @@ async function loadDict(forceRaw=false){
     await fetchAndBuild(localPath);
     ready = true;
     statusEl.textContent = `辞書ロード完了：${Object.keys(dict).length}語`;
+    debounceTranslate();
   }catch(e1){
     try{
       statusEl.textContent = "ローカル辞書取得失敗、GitHub raw から取得中…";
       await fetchAndBuild(rawUrl);
       ready = true;
       statusEl.textContent = `辞書ロード完了 (raw)：${Object.keys(dict).length}語`;
+      debounceTranslate();
     }catch(e2){
       ready = false;
       statusEl.textContent = "辞書ロード失敗";
@@ -410,18 +450,24 @@ async function fetchAndBuild(url){
   buildDictFromJson();
 }
 
+/* build dict and posMap */
 function buildDictFromJson(){
   dict = {};
+  posMap = {};
   (jsonData.words || []).forEach(w=>{
     const sim = w.entry?.form;
     if(!sim) return;
     (w.translations||[]).forEach(t=>{
       if(!t.rawForms) return;
+      const pos = t.pos;
       // remove parentheses, then split
       t.rawForms.replace(/（.*?）|\(.*?\)/g,"")
       .split(/[、,]/).forEach(j=>{
         j=j.trim();
-        if(j) dict[j]=sim;
+        if(j){
+          dict[j]=sim;
+          if(pos) posMap[j]=pos;
+        }
       });
     });
   });
@@ -437,10 +483,14 @@ function addEntryToJson(item){
   const sim = item.entry?.form;
   (item.translations||[]).forEach(t=>{
     if(!t.rawForms) return;
+    const pos = t.pos;
     t.rawForms.replace(/（.*?）|\(.*?\)/g,"")
     .split(/[、,]/).forEach(j=>{
       j=j.trim();
-      if(j) dict[j]=sim;
+      if(j){
+        dict[j]=sim;
+        if(pos) posMap[j]=pos;
+      }
     });
   });
   dictSizeEl.textContent = Object.keys(dict).length;
@@ -457,7 +507,7 @@ function translate(){
   }
   const text = raw.trim();
 
-  // コピュラ文 (例: 私は学生だ)
+  // 1) コピュラを明示する文 (例: 私は学生だ)
   let m = text.match(/^(.+?)は(.+?)(だ|です|である)$/);
   if(m){
     const subjJa = m[1];
@@ -471,7 +521,7 @@ function translate(){
     return;
   }
 
-  // SVO文 (例: 私は世界を見る)
+  // 2) SVO文 (例: 私は世界を見る)
   m = text.match(/^(.+?)は(.+?)を(.+)$/);
   if(m){
     const subjJa = m[1];
@@ -487,21 +537,38 @@ function translate(){
     return;
   }
 
-  // SV文 (例: 私は話す) — 主語＋動詞（を を含まない、だ/です などがない場合）
+  // 3) SV / 主語 + 述語 の場合判定
   m = text.match(/^(.+?)は(.+?)$/);
   if(m){
     const subjJa = m[1];
-    const verbJa = m[2];
-    // If verbJa ends with particles or punctuation that indicate it's not a simple SV, keep as-is but still attempt mapping.
+    const predJa = m[2];
     const subj = dict[subjJa] || subjJa;
-    const verb = dict[verbJa];
-    const verbHtml = verb ? escapeHTML(verb) : `<span class="unknown" data-unknown-core="${escapeHTML(verbJa)}">${escapeHTML(verbJa)}</span>`;
-    outputEl.innerHTML = `${escapeHTML(subj)} ${verbHtml}`;
+    const predSim = dict[predJa];
+    const predPos = posMap[predJa];
+
+    // 3a) 述語が形容詞ならコピュラを挟む（例: 私は大きい -> subj COPULA adj）
+    if(predSim && predPos === '形容詞'){
+      const person = PRONOUN_PERSON[subjJa] || "third";
+      outputEl.innerHTML = `${escapeHTML(subj)} <span class="tag">${escapeHTML(COPULA[person])}</span> ${escapeHTML(predSim)}`;
+      attachUnknownDataset();
+      return;
+    }
+
+    // 3b) 述語が動詞なら通常の SV（subj verb）
+    if(predSim && predPos === '動詞'){
+      outputEl.innerHTML = `${escapeHTML(subj)} ${escapeHTML(predSim)}`;
+      attachUnknownDataset();
+      return;
+    }
+
+    // 3c) 述語が未登録、もしくは品詞情報がない場合：既存の辞書で判定して表示（未知語は追加可能）
+    const predHtml = predSim ? escapeHTML(predSim) : `<span class="unknown" data-unknown-core="${escapeHTML(predJa)}">${escapeHTML(predJa)}</span>`;
+    outputEl.innerHTML = `${escapeHTML(subj)} ${predHtml}`;
     attachUnknownDataset();
     return;
   }
 
-  // 単語単位で辞書変換（未登録語はハイライト、かつクリックで追加）
+  // 4) 単語単位で辞書変換（未登録語はハイライト、かつクリックで追加）
   const words = text.split(/\s+/);
   const out = words.map(w=>{
     // 句読点を保持
@@ -531,8 +598,6 @@ function attachUnknownDataset(){
     s.dataset.unknownCore = core;
   });
 }
-
-/* openAddModal when clicking unknown: handled by document click listener */
 
 /* デバウンス */
 function debounceTranslate(){
