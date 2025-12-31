@@ -159,7 +159,7 @@ button.secondary{
 <main>
 
 <div class="card">
-  <textarea id="inputText" placeholder="私は学生だ / 私は世界を見る" autocomplete="off" autocapitalize="off"></textarea>
+  <textarea id="inputText" placeholder="私は学生だ / 私は世界を見る / 私は話す" autocomplete="off" autocapitalize="off"></textarea>
   <div class="note">（入力中に即時翻訳、IME確定は待ちます。未登録語はクリックで追加できます）</div>
 </div>
 
@@ -169,7 +169,7 @@ button.secondary{
 
 <div class="card">
   <div class="small-muted">辞書サイズ: <span id="dictSize">0</span> 語</div>
-  <div class="small-muted" style="margin-top:8px">操作: 未登録語をクリック → 品詞 / シムネ語形 / 表示日本語 / 訳 を入力して追加できます。JSON編集で直接編集後「適用」で読み込みます。</div>
+  <div class="small-muted" style="margin-top:8px">操作: 未登録語をクリック → 品詞（日本語表記） / シムネ語形 / 表示日本語 / 訳 を入力して追加できます。JSON編集で直接編集後「適用」で読み込みます。</div>
 </div>
 
 </main>
@@ -183,15 +183,16 @@ button.secondary{
       <input id="modalCore" disabled>
     </div>
     <div class="form-row">
-      <label>品詞 (任意)</label>
+      <label>品詞 (日本語)</label>
       <select id="modalPOS">
         <option value="">— 指定しない —</option>
-        <option value="noun">noun</option>
-        <option value="verb">verb</option>
-        <option value="adj">adjective</option>
-        <option value="adv">adverb</option>
-        <option value="pron">pronoun</option>
-        <option value="other">other</option>
+        <option value="名詞">名詞</option>
+        <option value="動詞">動詞</option>
+        <option value="形容詞">形容詞</option>
+        <option value="副詞">副詞</option>
+        <option value="代名詞">代名詞</option>
+        <option value="固有名詞">固有名詞</option>
+        <option value="その他">その他</option>
       </select>
     </div>
     <div class="form-row">
@@ -348,7 +349,7 @@ modalCancel.addEventListener("click", ()=>{ modalBackdrop.style.display = "none"
 modalAdd.addEventListener("click", ()=>{
   const core = modalCore.value.trim();
   const sim = modalSim.value.trim();
-  const pos = modalPOS.value;
+  const pos = modalPOS.value; // 日本語表記そのまま保存
   const jaDisplay = modalJa.value.trim() || core;
   const transRaw = modalTrans.value.trim();
 
@@ -359,10 +360,11 @@ modalAdd.addEventListener("click", ()=>{
 
   // translations として rawForms に日本語表記を入れる（カンマ区切り）
   const rawForms = transRaw || jaDisplay;
-  addEntryToJson({
+  const item = {
     entry: { form: sim },
     translations: [{ pos: pos || undefined, rawForms: rawForms }]
-  });
+  };
+  addEntryToJson(item);
   modalBackdrop.style.display = "none";
   debounceTranslate();
 });
@@ -481,6 +483,20 @@ function translate(){
     const objHtml = obj ? escapeHTML(obj) : `<span class="unknown" data-unknown-core="${escapeHTML(objJa)}">${escapeHTML(objJa)}</span>`;
     const verbHtml = verb ? escapeHTML(verb) : `<span class="unknown" data-unknown-core="${escapeHTML(verbJa)}">${escapeHTML(verbJa)}</span>`;
     outputEl.innerHTML = `${escapeHTML(subj)} ${verbHtml} ${objHtml}`;
+    attachUnknownDataset();
+    return;
+  }
+
+  // SV文 (例: 私は話す) — 主語＋動詞（を を含まない、だ/です などがない場合）
+  m = text.match(/^(.+?)は(.+?)$/);
+  if(m){
+    const subjJa = m[1];
+    const verbJa = m[2];
+    // If verbJa ends with particles or punctuation that indicate it's not a simple SV, keep as-is but still attempt mapping.
+    const subj = dict[subjJa] || subjJa;
+    const verb = dict[verbJa];
+    const verbHtml = verb ? escapeHTML(verb) : `<span class="unknown" data-unknown-core="${escapeHTML(verbJa)}">${escapeHTML(verbJa)}</span>`;
+    outputEl.innerHTML = `${escapeHTML(subj)} ${verbHtml}`;
     attachUnknownDataset();
     return;
   }
